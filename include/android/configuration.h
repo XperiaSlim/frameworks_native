@@ -81,6 +81,7 @@ enum {
     ACONFIGURATION_UI_INVERTED_MODE_YES = 0x0002,
     ACONFIGURATION_UI_INVERTED_MODE_NO = 0x0003,
 
+
     ACONFIGURATION_UI_MODE_TYPE_ANY = 0x00,
     ACONFIGURATION_UI_MODE_TYPE_NORMAL = 0x01,
     ACONFIGURATION_UI_MODE_TYPE_DESK = 0x02,
@@ -292,11 +293,6 @@ void AConfiguration_setScreenLong(AConfiguration* config, int32_t screenLong);
  * Return the current ACONFIGURATION_UI_INVERTED_MODE_* set in the configuration.
  */
 int32_t AConfiguration_getUiInvertedMode(AConfiguration* config);
-
-/**
- * Set the current inverted UI mode in the configuration.
- */
-void AConfiguration_setUiInvertedMode(AConfiguration* config, int32_t uiInvertedMode);
 
 /**
  * Return the current ACONFIGURATION_UI_MODE_TYPE_* set in the configuration.
