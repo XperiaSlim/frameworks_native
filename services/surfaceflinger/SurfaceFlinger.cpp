@@ -56,6 +56,9 @@
 #include "LayerDim.h"
 #include "LayerScreenshot.h"
 #include "SurfaceFlinger.h"
+#ifdef QCOM_HARDWARE
+#include "qcom_ui.h"
+#endif
 
 #include "DisplayHardware/DisplayHardware.h"
 #include "DisplayHardware/HWComposer.h"
@@ -66,10 +69,6 @@
 
 #ifdef BOARD_USES_SAMSUNG_HDMI
 #include "SecTVOutService.h"
-#endif
-
-#ifdef QCOM_HARDWARE
-#include <clear_regions.h>
 #endif
 
 #define EGL_VERSION_HW_ANDROID  0x3143
@@ -480,12 +479,16 @@ void SurfaceFlinger::onMessageReceived(int32_t what)
             if (CC_LIKELY(hw.canDraw())) {
                 // repaint the framebuffer (if needed)
                 handleRepaint();
+#ifndef STE_HARDWARE
                 // inform the h/w that we're done compositing
                 hw.compositionComplete();
+#endif
                 postFramebuffer();
             } else {
+#ifdef STE_HARDWARE
                 // pretend we did the post
                 hw.compositionComplete();
+#endif
             }
 
         } break;
@@ -892,8 +895,10 @@ void SurfaceFlinger::handleRepaint()
 
     // set the frame buffer
     const DisplayHardware& hw(graphicPlane(0).displayHardware());
+#ifndef STE_HARDWARE
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+#endif
 
     uint32_t flags = hw.getFlags();
     if (flags & DisplayHardware::SWAP_RECTANGLE) {
@@ -923,8 +928,15 @@ void SurfaceFlinger::handleRepaint()
     mDirtyRegion.clear();
 }
 
+#ifdef STE_HARDWARE
+static bool checkDrawingWithGL(hwc_layer_t* const layers, size_t layerCount);
+#endif
+
 void SurfaceFlinger::setupHardwareComposer()
 {
+#ifdef STE_HARDWARE
+    bool useGL = true;
+#endif
     const DisplayHardware& hw(graphicPlane(0).displayHardware());
     HWComposer& hwc(hw.getHwComposer());
     hwc_layer_t* const cur(hwc.getLayers());
@@ -954,7 +966,39 @@ void SurfaceFlinger::setupHardwareComposer()
     }
     status_t err = hwc.prepare();
     ALOGE_IF(err, "HWComposer::prepare failed (%s)", strerror(-err));
+#ifdef STE_HARDWARE
+    /*
+     * Check if GL will be used
+     */
+    useGL = checkDrawingWithGL(cur, count);
+
+    if (!useGL) {
+        return;
+    }
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    if (CC_UNLIKELY(!mWormholeRegion.isEmpty())) {
+        // should never happen unless the window manager has a bug
+        // draw something...
+        drawWormhole();
+    }
+#endif
 }
+
+#ifdef STE_HARDWARE
+static bool checkDrawingWithGL(hwc_layer_t* const layers, size_t layerCount)
+{
+    bool useGL = false;
+    if (layers) {
+        for (size_t i=0 ; i<layerCount ; i++) {
+            if (layers[i].compositionType == HWC_FRAMEBUFFER) {
+                useGL = true;
+            }
+        }
+    }
+    return useGL;
+}
+#endif
 
 void SurfaceFlinger::composeSurfaces(const Region& dirty)
 {
@@ -972,14 +1016,27 @@ void SurfaceFlinger::composeSurfaces(const Region& dirty)
             // remove where there are opaque FB layers. however, on some
             // GPUs doing a "clean slate" glClear might be more efficient.
             // We'll revisit later if needed.
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
+             const Region region(hw.bounds());
+#ifdef QCOM_HARDWARE
+             if (0 != qdutils::CBUtils::qcomuiClearRegion(region,
+                                              hw.getEGLDisplay()))
+#endif
+             {
+                 glClearColor(0, 0, 0, 0);
+                 glClear(GL_COLOR_BUFFER_BIT);
+             }
         } else {
+#ifndef STE_HARDWARE
             // screen is already cleared here
             if (!mWormholeRegion.isEmpty()) {
                 // can happen with SurfaceView
-                drawWormhole();
+#ifdef QCOM_HARDWARE
+                if (0 != qdutils::CBUtils::qcomuiClearRegion(mWormholeRegion,
+                                            hw.getEGLDisplay()))
+#endif
+                    drawWormhole();
             }
+#endif
         }
 
         /*
@@ -1004,22 +1061,33 @@ void SurfaceFlinger::composeSurfaces(const Region& dirty)
                             && layer->isOpaque()) {
                         // never clear the very first layer since we're
                         // guaranteed the FB is already cleared
+#ifdef QCOM_HARDWARE
+                        if (0 != qdutils::CBUtils::qcomuiClearRegion(clip,
+                                                           hw.getEGLDisplay()))
+#endif
                         layer->clearWithOpenGL(clip);
                     }
                     continue;
                 }
+#ifdef QCOM_HARDWARE
+                if (cur && (cur[i].compositionType != HWC_FRAMEBUFFER))
+                    continue;
+#endif
+
                 // render the layer
                 layer->draw(clip);
             }
         }
+
+#ifdef QCOM_HARDWARE
     } else if (cur && !mWormholeRegion.isEmpty()) {
             const Region region(mWormholeRegion.intersect(mDirtyRegion));
             if (!region.isEmpty()) {
-#ifdef QCOM_HARDWARE
-               if (0 != qdutils::qcomuiClearRegion(region, hw.getEGLDisplay()))
-#endif
+                if (0 != qdutils::CBUtils::qcomuiClearRegion(region,
+                                            hw.getEGLDisplay()))
                       drawWormhole();
         }
+#endif
     }
 }
 
@@ -2520,7 +2588,9 @@ status_t SurfaceFlinger::captureScreenImplLocked(DisplayID dpy,
     glDeleteRenderbuffersOES(1, &tname);
     glDeleteFramebuffersOES(1, &name);
 
+#ifdef STE_HARDWARE
     hw.compositionComplete();
+#endif
 
     // ALOGD("screenshot: result = %s", result<0 ? strerror(result) : "OK");
 
@@ -2748,9 +2818,15 @@ sp<GraphicBuffer> GraphicBufferAlloc::createGraphicBuffer(uint32_t w, uint32_t h
         if (err == NO_MEMORY) {
             GraphicBuffer::dumpAllocationsToSystemLog();
         }
+#ifndef STE_HARDWARE
         ALOGE("GraphicBufferAlloc::createGraphicBuffer(w=%d, h=%d) "
              "failed (%s), handle=%p",
                 w, h, strerror(-err), graphicBuffer->handle);
+#else
+        ALOGE("GraphicBufferAlloc::createGraphicBuffer(w=%d, h=%d, format=%#x) "
+             "failed (%s), handle=%p",
+                w, h, format, strerror(-err), graphicBuffer->handle);
+#endif
         return 0;
     }
     return graphicBuffer;

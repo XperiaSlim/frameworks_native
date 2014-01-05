@@ -70,10 +70,14 @@ static const extention_map_t sExtentionMap[] = {
             (__eglMustCastToProperFunctionPointerType)&eglCreateImageKHR },
     { "eglDestroyImageKHR",
             (__eglMustCastToProperFunctionPointerType)&eglDestroyImageKHR },
+    { "eglGetRenderBufferANDROID",
+        (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
+#ifndef STE_HARDWARE
     { "eglGetSystemTimeFrequencyNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeFrequencyNV },
     { "eglGetSystemTimeNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeNV },
+#endif
 };
 
 // accesses protected by sExtensionMapMutex
@@ -1110,11 +1114,12 @@ EGLBoolean eglDestroyImageKHR(EGLDisplay dpy, EGLImageKHR img)
     const egl_display_ptr dp = validate_display(dpy);
     if (!dp) return EGL_FALSE;
 
+    EGLBoolean result = EGL_FALSE;
     egl_connection_t* const cnx = &gEGLImpl;
     if (cnx->dso && cnx->egl.eglDestroyImageKHR) {
-        cnx->egl.eglDestroyImageKHR(dp->disp.dpy, img);
+        result = cnx->egl.eglDestroyImageKHR(dp->disp.dpy, img);
     }
-    return EGL_TRUE;
+    return result;
 }
 
 // ----------------------------------------------------------------------------
@@ -1190,11 +1195,26 @@ EGLBoolean eglGetSyncAttribKHR(EGLDisplay dpy, EGLSyncKHR sync,
 // ANDROID extensions
 // ----------------------------------------------------------------------------
 
-/* ANDROID extensions entry-point go here */
+EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
+{
+    clearError();
+
+    const egl_display_ptr dp = validate_display(dpy);
+    if (!dp) return EGL_FALSE;
+
+    egl_surface_t const * const s = get_surface(draw);
+
+    egl_connection_t* const cnx = &gEGLImpl;
+    if (cnx->dso && cnx->egl.eglGetRenderBufferANDROID) {
+        return cnx->egl.eglGetRenderBufferANDROID(dp->disp.dpy, s->surface);
+    }
+    return setError(EGL_BAD_DISPLAY, (EGLClientBuffer*)0);
+}
 
 // ----------------------------------------------------------------------------
 // NVIDIA extensions
 // ----------------------------------------------------------------------------
+#ifndef STE_HARDWARE
 EGLuint64NV eglGetSystemTimeFrequencyNV()
 {
     clearError();
@@ -1230,3 +1250,4 @@ EGLuint64NV eglGetSystemTimeNV()
 
     return setErrorQuiet(EGL_BAD_DISPLAY, 0);
 }
+#endif
