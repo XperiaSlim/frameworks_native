@@ -30,7 +30,8 @@ LOCAL_SHARED_LIBRARIES := \
 	libcutils \
 	libhardware \
 	libsync \
-	libutils
+	libutils \
+	liblog
 
 ifneq ($(BOARD_FRAMEBUFFER_FORCE_FORMAT),)
 LOCAL_CFLAGS += -DFRAMEBUFFER_FORCE_FORMAT=$(BOARD_FRAMEBUFFER_FORCE_FORMAT)
@@ -55,8 +56,13 @@ LOCAL_C_INCLUDES += hardware/samsung/$(TARGET_BOARD_PLATFORM)/libhdmi/libhdmiser
 LOCAL_C_INCLUDES += hardware/samsung/$(TARGET_BOARD_PLATFORM)/include
 endif
 
-ifeq ($(BOARD_USES_LEGACY_OVERLAY), true)
-LOCAL_SRC_FILES += legacy/Overlay.cpp
+# Executed only on QCOM BSPs
+ifeq ($(TARGET_USES_QCOM_BSP),true)
+    LOCAL_CFLAGS += -DQCOM_BSP
+endif
+
+ifeq ($(BOARD_HAVE_PIXEL_FORMAT_INFO),true)
+LOCAL_CFLAGS += -DHAVE_PIXEL_FORMAT_INFO
 endif
 
 LOCAL_MODULE:= libui

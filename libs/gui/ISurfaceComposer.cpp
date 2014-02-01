@@ -28,7 +28,7 @@
 #include <gui/BitTube.h>
 #include <gui/IDisplayEventConnection.h>
 #include <gui/ISurfaceComposer.h>
-#include <gui/ISurfaceTexture.h>
+#include <gui/IGraphicBufferProducer.h>
 
 #include <private/gui/LayerState.h>
 
@@ -102,29 +102,27 @@ public:
         remote()->transact(BnSurfaceComposer::BOOT_FINISHED, data, &reply);
     }
 
-    virtual status_t captureScreen(
-            const sp<IBinder>& display, sp<IMemoryHeap>* heap,
-            uint32_t* width, uint32_t* height, PixelFormat* format,
+    virtual status_t captureScreen(const sp<IBinder>& display,
+            const sp<IGraphicBufferProducer>& producer,
             uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ)
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool isCpuConsumer)
     {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(display);
+        data.writeStrongBinder(producer->asBinder());
         data.writeInt32(reqWidth);
         data.writeInt32(reqHeight);
         data.writeInt32(minLayerZ);
         data.writeInt32(maxLayerZ);
+        data.writeInt32(isCpuConsumer);
         remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
-        *heap = interface_cast<IMemoryHeap>(reply.readStrongBinder());
-        *width = reply.readInt32();
-        *height = reply.readInt32();
-        *format = reply.readInt32();
         return reply.readInt32();
     }
 
     virtual bool authenticateSurfaceTexture(
-            const sp<ISurfaceTexture>& surfaceTexture) const
+            const sp<IGraphicBufferProducer>& bufferProducer) const
     {
         Parcel data, reply;
         int err = NO_ERROR;
@@ -135,7 +133,7 @@ public:
                     "interface descriptor: %s (%d)", strerror(-err), -err);
             return false;
         }
-        err = data.writeStrongBinder(surfaceTexture->asBinder());
+        err = data.writeStrongBinder(bufferProducer->asBinder());
         if (err != NO_ERROR) {
             ALOGE("ISurfaceComposer::authenticateSurfaceTexture: error writing "
                     "strong binder to parcel: %s (%d)", strerror(-err), -err);
@@ -189,6 +187,14 @@ public:
         return reply.readStrongBinder();
     }
 
+    virtual void destroyDisplay(const sp<IBinder>& display)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeStrongBinder(display);
+        remote()->transact(BnSurfaceComposer::DESTROY_DISPLAY, data, &reply);
+    }
+
     virtual sp<IBinder> getBuiltInDisplay(int32_t id)
     {
         Parcel data, reply;
@@ -237,12 +243,14 @@ status_t BnSurfaceComposer::onTransact(
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> b = createConnection()->asBinder();
             reply->writeStrongBinder(b);
-        } break;
+            return NO_ERROR;
+        }
         case CREATE_GRAPHIC_BUFFER_ALLOC: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> b = createGraphicBufferAlloc()->asBinder();
             reply->writeStrongBinder(b);
-        } break;
+            return NO_ERROR;
+        }
         case SET_TRANSACTION_STATE: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             size_t count = data.readInt32();
@@ -263,42 +271,43 @@ status_t BnSurfaceComposer::onTransact(
             }
             uint32_t flags = data.readInt32();
             setTransactionState(state, displays, flags);
-        } break;
+            return NO_ERROR;
+        }
         case BOOT_FINISHED: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             bootFinished();
-        } break;
+            return NO_ERROR;
+        }
         case CAPTURE_SCREEN: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> display = data.readStrongBinder();
+            sp<IGraphicBufferProducer> producer =
+                    interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
             uint32_t reqWidth = data.readInt32();
             uint32_t reqHeight = data.readInt32();
             uint32_t minLayerZ = data.readInt32();
             uint32_t maxLayerZ = data.readInt32();
-            sp<IMemoryHeap> heap;
-            uint32_t w, h;
-            PixelFormat f;
-            status_t res = captureScreen(display, &heap, &w, &h, &f,
-                    reqWidth, reqHeight, minLayerZ, maxLayerZ);
-            reply->writeStrongBinder(heap->asBinder());
-            reply->writeInt32(w);
-            reply->writeInt32(h);
-            reply->writeInt32(f);
+            bool isCpuConsumer = data.readInt32();
+            status_t res = captureScreen(display, producer,
+                    reqWidth, reqHeight, minLayerZ, maxLayerZ,
+                    isCpuConsumer);
             reply->writeInt32(res);
-        } break;
+            return NO_ERROR;
+        }
         case AUTHENTICATE_SURFACE: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<ISurfaceTexture> surfaceTexture =
-                    interface_cast<ISurfaceTexture>(data.readStrongBinder());
-            int32_t result = authenticateSurfaceTexture(surfaceTexture) ? 1 : 0;
+            sp<IGraphicBufferProducer> bufferProducer =
+                    interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
+            int32_t result = authenticateSurfaceTexture(bufferProducer) ? 1 : 0;
             reply->writeInt32(result);
-        } break;
+            return NO_ERROR;
+        }
         case CREATE_DISPLAY_EVENT_CONNECTION: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IDisplayEventConnection> connection(createDisplayEventConnection());
             reply->writeStrongBinder(connection->asBinder());
             return NO_ERROR;
-        } break;
+        }
         case CREATE_DISPLAY: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             String8 displayName = data.readString8();
@@ -306,24 +315,32 @@ status_t BnSurfaceComposer::onTransact(
             sp<IBinder> display(createDisplay(displayName, secure));
             reply->writeStrongBinder(display);
             return NO_ERROR;
-        } break;
+        }
+        case DESTROY_DISPLAY: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> display = data.readStrongBinder();
+            destroyDisplay(display);
+            return NO_ERROR;
+        }
         case GET_BUILT_IN_DISPLAY: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             int32_t id = data.readInt32();
             sp<IBinder> display(getBuiltInDisplay(id));
             reply->writeStrongBinder(display);
             return NO_ERROR;
-        } break;
+        }
         case BLANK: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> display = data.readStrongBinder();
             blank(display);
-        } break;
+            return NO_ERROR;
+        }
         case UNBLANK: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> display = data.readStrongBinder();
             unblank(display);
-        } break;
+            return NO_ERROR;
+        }
         case GET_DISPLAY_INFO: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             DisplayInfo info;
@@ -331,10 +348,13 @@ status_t BnSurfaceComposer::onTransact(
             status_t result = getDisplayInfo(display, &info);
             memcpy(reply->writeInplace(sizeof(DisplayInfo)), &info, sizeof(DisplayInfo));
             reply->writeInt32(result);
-        } break;
-        default:
+            return NO_ERROR;
+        }
+        default: {
             return BBinder::onTransact(code, data, reply, flags);
+        }
     }
+    // should be unreachable
     return NO_ERROR;
 }
 

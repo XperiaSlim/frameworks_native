@@ -28,16 +28,16 @@ namespace android {
 // ---------------------------------------------------------------------------
 
 class Layer;
+class SurfaceFlinger;
 
-// SurfaceTextureLayer is now a BufferQueue since SurfaceTexture has been
-// refactored
-class SurfaceTextureLayer : public BufferQueue
-{
+/*
+ * This is a thin wrapper around BufferQueue, used by the Layer class.
+ */
+class SurfaceTextureLayer : public BufferQueue {
+    sp<SurfaceFlinger> flinger;
 public:
-    SurfaceTextureLayer();
-    ~SurfaceTextureLayer();
-
-    virtual status_t connect(int api, QueueBufferOutput* output);
+    SurfaceTextureLayer(const sp<SurfaceFlinger>& flinger);
+    virtual ~SurfaceTextureLayer();
 };
 
 // ---------------------------------------------------------------------------
