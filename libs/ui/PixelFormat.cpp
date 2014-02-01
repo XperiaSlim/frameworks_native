@@ -88,10 +88,26 @@ status_t getPixelFormatInfo(PixelFormat format, PixelFormatInfo* info)
     switch (format) {
     case HAL_PIXEL_FORMAT_YCbCr_422_SP:
     case HAL_PIXEL_FORMAT_YCbCr_422_I:
+#ifdef STE_HARDWARE
+    case HAL_PIXEL_FORMAT_YCrCb_422_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_422_P:
+    case HAL_PIXEL_FORMAT_YCrCb_422_P:
+    case HAL_PIXEL_FORMAT_CbYCrY_422_I:
+#endif
         info->bitsPerPixel = 16;
         goto done;
     case HAL_PIXEL_FORMAT_YCrCb_420_SP:
     case HAL_PIXEL_FORMAT_YV12:
+#ifdef STE_HARDWARE
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_TILED:
+    case HAL_PIXEL_FORMAT_YCbCr_420_P:
+    case HAL_PIXEL_FORMAT_YCrCb_420_P:
+    case HAL_PIXEL_FORMAT_YCbCr_420_I:
+    case HAL_PIXEL_FORMAT_CbYCrY_420_I:
+    case HAL_PIXEL_FORMAT_YCBCR42XMBN:
+#endif
         info->bitsPerPixel = 12;
      done:
         info->format = format;
@@ -156,6 +172,22 @@ ssize_t bitsPerPixel(PixelFormat format) {
         case PIXEL_FORMAT_RGBA_5551:
         case PIXEL_FORMAT_RGBA_4444:
             return 16;
+    }
+    return BAD_VALUE;
+}
+
+unsigned int minColorDepth(PixelFormat format) {
+    switch (format) {
+        case PIXEL_FORMAT_RGBA_8888:
+        case PIXEL_FORMAT_RGBX_8888:
+        case PIXEL_FORMAT_BGRA_8888:
+        case PIXEL_FORMAT_RGB_888:
+            return 8;
+        case PIXEL_FORMAT_RGB_565:
+        case PIXEL_FORMAT_RGBA_5551:
+            return 5;
+        case PIXEL_FORMAT_RGBA_4444:
+            return 4;
     }
     return BAD_VALUE;
 }
